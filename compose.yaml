@@ -1,0 +1,94 @@
+version: '3.2'
+
+services:
+  elasticsearch:
+    image: elasticsearch:7.17.10
+    container_name: es
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms1024m -Xmx1024m"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - elastic
+    volumes:
+      - es-data01:/usr/share/elasticsearch/data
+    healthcheck:
+      test: curl -s http://localhost:9200/_cluster/health | grep -vq '"status":"red"'
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+  logstash:
+    image: logstash:7.17.10
+    container_name: log
+    volumes:
+      - source: ./pipelines
+        target: /usr/share/logstash/pipeline
+        type: bind
+    ports:
+      - "5000:5000"
+      - "9600:9600"
+      - "12201:12201/udp"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elastic
+
+
+  kibana:
+    image: kibana:7.17.10
+    container_name: kib
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - elastic
+
+  apm-server:
+    image: elastic/apm-server:7.17.10
+    container_name: apm
+    ports:
+    - "8200:8200"
+    - "1514:1514/udp"
+    environment:
+      - apm-server.rum.enabled=true
+      - setup.kibana.host=kibana:5601
+      - setup.template.settings.index.number_of_replicas=0
+      - apm-server.kibana.enabled=true
+      - apm-server.kibana.host=kibana:5601
+      - output.elasticsearch.hosts=["elasticsearch:9200"]
+    depends_on:
+      - elasticsearch
+    networks:
+      - elastic
+
+  metricbeat:
+    image: elastic/metricbeat:7.17.10
+    container_name: mb
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    volumes:
+      - metricbeat-data01:/usr/share/metricbeat/data
+      - ./metricbeat.yml:/usr/share/metricbeat/metricbeat.yml
+    ports:
+    - "8080:8080"
+    networks:
+      - elastic
+    # network_mode: "host"
+    extra_hosts:
+    - "host.docker.internal:host-gateway"
+    depends_on:
+      - elasticsearch
+
+networks:
+  elastic:
+    external: true
+
+volumes:
+  es-data01:
+    driver: local
+  metricbeat-data01:
+    driver: local
